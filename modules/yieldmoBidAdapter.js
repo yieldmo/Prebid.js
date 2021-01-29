@@ -11,7 +11,7 @@ const TIME_TO_LIVE = 300;
 const NET_REVENUE = true;
 const BANNER_SERVER_ENDPOINT = 'https://ads.yieldmo.com/exchange/prebid';
 const VIDEO_SERVER_ENDPOINT = 'https://ads.yieldmo.com/exchange/prebidvideo';
-const OUTSTREAM_VIDEO_PLAYER_URL = 'https://cdn.adnxs.com/renderer/video/ANOutstreamVideo.js';
+const OUTSTREAM_VIDEO_PLAYER_URL = 'https://prebid-outstream.yieldmo.com/bundle.js';
 const OPENRTB_VIDEO_BIDPARAMS = ['placement', 'startdelay', 'skipafter',
   'protocols', 'api', 'playbackmethod', 'maxduration', 'minduration', 'pos'];
 const OPENRTB_VIDEO_SITEPARAMS = ['name', 'domain', 'cat', 'keywords'];
@@ -200,14 +200,9 @@ function createNewBannerBid(response) {
  * @param bidRequest server request
  */
 function createNewVideoBid(response, bidRequest) {
-<<<<<<< HEAD
-  const imp = find((utils.deepAccess(bidRequest, 'data.imp') || []), imp => imp.id === response.impid);
-  return {
-=======
   const imp = (utils.deepAccess(bidRequest, 'data.imp') || []).find(imp => imp.id === response.impid);
 
   let result = {
->>>>>>> trying outstream feature support
     requestId: imp.id,
     cpm: response.price,
     width: imp.video.w,
@@ -221,59 +216,28 @@ function createNewVideoBid(response, bidRequest) {
   };
 
   if (imp.placement !== 1) {
-    // outstream case
-    console.log('createNewVideoBid', response, bidRequest, imp);
-    /* if (!bid.renderer && type === VIDEO && utils.deepAccess(bid, 'mediaTypes.video.context') === 'outstream') {
-      bidObject.renderer = Renderer.install({ id: bid.bidId, url: OUTSTREAM_RENDERER_URL });
 
-      const renderer = Renderer.install({
-        url: 'https://' + playerDomain + '/script/6.1/prebidRenderer.js',
-        config: config,
-        loaded: false,
-      });
-
-      bidObject.renderer.setRender(renderer);
-
-      renderer.setEventHandlers({
-        impression: () => utils.logMessage('AppNexus outstream video impression event'),
-        loaded: () => utils.logMessage('AppNexus outstream video loaded event'),
-        ended: () => {
-          utils.logMessage('AppNexus outstream renderer video event');
-          document.querySelector(`#${adUnitCode}`).style.display = 'none';
-        }
-      });
-    } */
     const renderer = Renderer.install({
       url: OUTSTREAM_VIDEO_PLAYER_URL,
-      // config: config,
+      config: {
+        width: result.width,
+        height: result.height,
+        vastTimeout: 5000,
+        maxAllowedVastTagRedirects: 3,
+        allowVpaid: false,
+        autoPlay: true,
+        preload: true,
+        mute: true
+      },
+      id: imp.tagid,
       loaded: false,
-      // adUnitCode:
     });
 
     renderer.setRender(function (bid) {
-      console.log('renderer.setRender!!!!!!!!!!! render bid received ', { bid });
-      // push to render queue because ANOutstreamVideo may not be loaded yet.
+
       bid.renderer.push(() => {
-        ANOutstreamVideo.renderAd({
-          targetId: bid.adUnitCode, // target div id to render video.
-          adResponse: {
-            ad: {
-              video: {
-                content: bid.vastXml,
-                player_height: bid.playerHeight,
-                player_width: bid.playerWidth
-              }
-            }
-          }
-          /* window.ANOutstreamVideo.renderAd({
-            tagId: bid.adResponse.tag_id,
-            sizes: [bid.getSize().split('x')],
-            targetId: bid.adUnitCode, // target div id to render video
-            uuid: bid.adResponse.uuid,
-            adResponse: bid.adResponse,
-            rendererOptions: bid.renderer.getConfig()
-          }, handleOutstreamRendererEvents.bind(null, bid)); */
-        });
+        const { id, config } = bid.renderer;
+        window.outstreamPlayer(bid, id, config);
       });
     });
 
