@@ -10,8 +10,8 @@ Note: Our ads will only render in mobile
 # Description
 
 Connects to Yieldmo Ad Server for bids.
-
 Yieldmo bid adapter supports Banner and Video.
+Built-in renderer included.
 
 # Test Parameters
 

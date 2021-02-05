@@ -3,7 +3,10 @@ import { BANNER, VIDEO } from '../src/mediaTypes.js';
 import { registerBidder } from '../src/adapters/bidderFactory.js';
 import { Renderer } from '../src/Renderer.js';
 import includes from 'core-js-pure/features/array/includes';
-import find from 'core-js-pure/features/array/find.js';
+// import { server } from 'gulp-connect';
+// import find from 'core-js-pure/features/array/find.js';
+
+import { dummyData } from '../response.js';
 
 const BIDDER_CODE = 'yieldmo';
 const CURRENCY = 'USD';
@@ -11,7 +14,7 @@ const TIME_TO_LIVE = 300;
 const NET_REVENUE = true;
 const BANNER_SERVER_ENDPOINT = 'https://ads.yieldmo.com/exchange/prebid';
 const VIDEO_SERVER_ENDPOINT = 'https://ads.yieldmo.com/exchange/prebidvideo';
-const OUTSTREAM_VIDEO_PLAYER_URL = 'https://prebid-outstream.yieldmo.com/bundle.js';
+const OUTSTREAM_VIDEO_PLAYER_URL = '//prebid-outstream.yieldmo.com/bundle.js';
 const OPENRTB_VIDEO_BIDPARAMS = ['placement', 'startdelay', 'skipafter',
   'protocols', 'api', 'playbackmethod', 'maxduration', 'minduration', 'pos'];
 const OPENRTB_VIDEO_SITEPARAMS = ['name', 'domain', 'cat', 'keywords'];
@@ -116,7 +119,8 @@ export const spec = {
    */
   interpretResponse: function (serverResponse, bidRequest) {
     let bids = [];
-    const data = serverResponse.body;
+    // const data = serverResponse.body;
+    const data = dummyData;
     if (data.length > 0) {
       data.forEach(response => {
         if (response.cpm > 0) {
@@ -200,7 +204,8 @@ function createNewBannerBid(response) {
  * @param bidRequest server request
  */
 function createNewVideoBid(response, bidRequest) {
-  const imp = (utils.deepAccess(bidRequest, 'data.imp') || []).find(imp => imp.id === response.impid);
+  const impArr = utils.deepAccess(bidRequest, 'data.imp');
+  const imp = impArr.find(imp => imp.id === response.impid) || impArr[0];
 
   let result = {
     requestId: imp.id,
@@ -215,7 +220,26 @@ function createNewVideoBid(response, bidRequest) {
     vastXml: response.adm
   };
 
+  const playbackmethodMap = [
+    {
+      preload: true,
+      mute: false,
+      autoPlay: true
+    },
+    {
+      preload: true,
+      mute: true,
+      autoPlay: true
+    }
+  ];
+
   if (imp.placement !== 1) {
+
+    const recievedPBM = imp.video.playbackmethod[0] || 2;
+    const playbackIdx = (recievedPBM >= 1 && recievedPBM <= 2)
+      ? recievedPBM - 1
+      : 0
+    ;
 
     const renderer = Renderer.install({
       url: OUTSTREAM_VIDEO_PLAYER_URL,
@@ -226,15 +250,13 @@ function createNewVideoBid(response, bidRequest) {
         maxAllowedVastTagRedirects: 3,
         allowVpaid: false,
         autoPlay: true,
-        preload: true,
-        mute: true
+        ...playbackmethodMap[playbackIdx]
       },
       id: imp.tagid,
       loaded: false,
     });
 
     renderer.setRender(function (bid) {
-
       bid.renderer.push(() => {
         const { id, config } = bid.renderer;
         window.outstreamPlayer(bid, id, config);
