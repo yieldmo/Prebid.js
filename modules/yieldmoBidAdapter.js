@@ -280,7 +280,7 @@ function openRtbImpression(bidRequest) {
   const imp = {
     id: bidRequest.bidId,
     tagid: bidRequest.adUnitCode,
-    bidfloor: bidRequest.params.bidfloor || 0,
+    bidfloor: getBidFloor(bidRequest),
     ext: {
       placement_id: bidRequest.params.placementId
     },
@@ -302,6 +302,16 @@ function openRtbImpression(bidRequest) {
   }
 
   return imp;
+}
+
+function getBidFloor(bidRequest) {
+  let floorInfo = {};
+
+  if (typeof bidRequest.getFloor === 'function') {
+    floorInfo = bidRequest.getFloor({ currency: CURRENCY, mediaType: VIDEO, size: '*' });
+  }
+
+  return floorInfo.floor || bidRequest.params.bidfloor || 0;
 }
 
 /**
