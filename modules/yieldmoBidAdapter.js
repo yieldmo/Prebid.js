@@ -13,6 +13,8 @@ const VIDEO_SERVER_ENDPOINT = 'https://ads.yieldmo.com/exchange/prebidvideo';
 const OPENRTB_VIDEO_BIDPARAMS = ['placement', 'startdelay', 'skipafter',
   'protocols', 'api', 'playbackmethod', 'maxduration', 'minduration', 'pos'];
 const OPENRTB_VIDEO_SITEPARAMS = ['name', 'domain', 'cat', 'keywords'];
+const MAX_BANNER_REQUEST_URL_LENGTH = 8000;
+const BANNER_REQUEST_PROPERTIES_TO_REDUCE = ['description', 'title', 'pr', 'page_url'];
 const localWindow = utils.getWindowTop();
 
 export const spec = {
@@ -47,7 +49,7 @@ export const spec = {
         p: [],
         page_url: bidderRequest.refererInfo.referer,
         bust: new Date().getTime().toString(),
-        pr: bidderRequest.refererInfo.referer,
+        pr: (localWindow.document && localWindow.document.referrer) || '',
         scrd: localWindow.devicePixelRatio || 0,
         dnt: getDNT(),
         description: getPageDescription(),
@@ -88,6 +90,20 @@ export const spec = {
         }
       });
       serverRequest.p = '[' + serverRequest.p.toString() + ']';
+
+      // check if url exceeded max length
+      const url = `${BANNER_SERVER_ENDPOINT}?${utils.parseQueryStringParameters(serverRequest)}`;
+      let extraCharacters = url.length - MAX_BANNER_REQUEST_URL_LENGTH;
+      if (extraCharacters > 0) {
+        for (const property of BANNER_REQUEST_PROPERTIES_TO_REDUCE) {
+          extraCharacters = shortcutProperty(extraCharacters, serverRequest, property);
+
+          if (extraCharacters <= 0) {
+            break;
+          }
+        }
+      }
+
       serverRequests.push({
         method: 'GET',
         url: BANNER_SERVER_ENDPOINT,
@@ -230,7 +246,7 @@ function getPageDescription() {
   if (document.querySelector('meta[name="description"]')) {
     return document
       .querySelector('meta[name="description"]')
-      .getAttribute('content'); // Value of the description metadata from the publisher's page.
+      .getAttribute('content') || ''; // Value of the description metadata from the publisher's page.
   } else {
     return '';
   }
@@ -456,4 +472,26 @@ function validateVideoParams(bid) {
     utils.logError(e.message);
     return false;
   }
+}
+
+/**
+ * Shortcut object property and check if required characters count was deleted
+ *
+ * @param {number} extraCharacters, count of characters to remove
+ * @param {object} target, object on which string property length should be reduced
+ * @param {string} propertyName, name of property to reduce
+ * @return {number} 0 if required characters count was removed otherwise count of how many left
+ */
+function shortcutProperty(extraCharacters, target, propertyName) {
+  if (target[propertyName].length > extraCharacters) {
+    target[propertyName] = target[propertyName].substring(0, target[propertyName].length - extraCharacters);
+
+    return 0
+  }
+
+  const charactersLeft = extraCharacters - target[propertyName].length;
+
+  target[propertyName] = '';
+
+  return charactersLeft;
 }

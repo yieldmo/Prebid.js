@@ -256,6 +256,53 @@ describe('YieldmoAdapter', function () {
         const data = buildAndGetData([mockBannerBid({schain})]);
         expect(data.schain).equal(JSON.stringify(schain));
       });
+
+      it('should not exceed max url length', () => {
+        const longString = new Array(8000).join('a');
+        const localWindow = utils.getWindowTop();
+
+        const originalTitle = localWindow.document.title;
+        localWindow.document.title = longString;
+
+        const request = spec.buildRequests(
+          [mockBannerBid()],
+          mockBidderRequest({
+            refererInfo: {
+              numIframes: 1,
+              reachedTop: true,
+              referer: longString,
+            },
+          })
+        )[0];
+        const url = `${request.url}?${utils.parseQueryStringParameters(request.data)}`;
+
+        expect(url.length).equal(8000);
+
+        localWindow.document.title = originalTitle;
+      });
+
+      it('should only shortcut properties rather then completely remove it', () => {
+        const longString = new Array(7516).join('a');
+        const localWindow = utils.getWindowTop();
+
+        const originalTitle = localWindow.document.title;
+        localWindow.document.title = `testtitle${longString}`;
+
+        const request = spec.buildRequests(
+          [mockBannerBid()],
+          mockBidderRequest({
+            refererInfo: {
+              numIframes: 1,
+              reachedTop: true,
+              referer: longString,
+            },
+          })
+        )[0];
+
+        expect(request.data.title).equal('testtitle');
+
+        localWindow.document.title = originalTitle;
+      });
     });
 
     describe('Instream video:', function () {
