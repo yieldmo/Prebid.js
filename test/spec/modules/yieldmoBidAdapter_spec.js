@@ -153,10 +153,10 @@ describe('YieldmoAdapter', function () {
       utils.deepAccess(build(bidRequests, bidderReq), `${index}.data`) || {};
 
     describe('Banner:', function () {
-      it('should attempt to send banner bid requests to the endpoint via GET', function () {
+      it('should attempt to send banner bid requests to the endpoint via POST', function () {
         const requests = build([mockBannerBid()]);
         expect(requests.length).to.equal(1);
-        expect(requests[0].method).to.equal('GET');
+        expect(requests[0].method).to.equal('POST');
         expect(requests[0].url).to.be.equal(BANNER_ENDPOINT);
       });
 
