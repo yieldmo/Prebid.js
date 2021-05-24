@@ -11,7 +11,7 @@ Note: Our ads will only render in mobile
 
 Connects to Yieldmo Ad Server for bids.
 
-Yieldmo bid adapter supports Banner and Video.
+Yieldmo bid adapter supports Banner and Video. Includes support for LiveRamp's Authenticated Traffic Solution ATS.
 
 # Test Parameters
 
