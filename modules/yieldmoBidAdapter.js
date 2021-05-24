@@ -277,8 +277,11 @@ function createNewVideoBid(response, bidRequest) {
  * Gets Authenticated Traffic Solution ATS Envelope if available
  * @returns ATS Envelope
  */
- function getATSEnvelope() {
-  let ATSEnvelope = window.ats.retrieveEnvelope()['envelope'];
+function getATSEnvelope() {
+  let ATSEnvelope;
+  if (window.ats) {
+    ATSEnvelope = window.ats.retrieveEnvelope()['envelope'];
+  }
 
   if (ATSEnvelope === undefined) {
     let liveRampCookie = document.cookie.match('(^|;) *_lr_env=([^;]*)');
