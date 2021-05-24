@@ -53,6 +53,7 @@ export const spec = {
         p: [],
         page_url: bidderRequest.refererInfo.referer,
         bust: new Date().getTime().toString(),
+        lr_env: getATSEnvelope(),
         pr: (LOCAL_WINDOW.document && LOCAL_WINDOW.document.referrer) || '',
         scrd: LOCAL_WINDOW.devicePixelRatio || 0,
         dnt: getDNT(),
@@ -270,6 +271,23 @@ function createNewVideoBid(response, bidRequest) {
   }
 
   return result;
+}
+
+/**
+ * Gets Authenticated Traffic Solution ATS Envelope if available
+ * @returns ATS Envelope
+ */
+ function getATSEnvelope() {
+  let ATSEnvelope = window.ats.retrieveEnvelope()['envelope'];
+
+  if (ATSEnvelope === undefined) {
+    let liveRampCookie = document.cookie.match('(^|;) *_lr_env=([^;]*)');
+    if (liveRampCookie !== null) {
+      ATSEnvelope = liveRampCookie[2];
+    }
+  }
+
+  return ATSEnvelope;
 }
 
 /**
