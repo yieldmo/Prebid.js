@@ -203,6 +203,7 @@ describe('YieldmoAdapter', function () {
         expect(data.hasOwnProperty('scrd')).to.be.true;
         expect(data.dnt).to.be.false;
         expect(data.hasOwnProperty('description')).to.be.true;
+        expect(data.hasOwnProperty('lr_env')).to.be.true;
         expect(data.hasOwnProperty('title')).to.be.true;
         expect(data.hasOwnProperty('h')).to.be.true;
         expect(data.hasOwnProperty('w')).to.be.true;
