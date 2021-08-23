@@ -328,6 +328,16 @@ describe('YieldmoAdapter', function () {
 
         localWindow.document.title = originalTitle;
       });
+
+      it('should add gpid to the banner bid request', function () {
+        let bidArray = [mockBannerBid({
+          ortb2Imp: {
+            ext: { data: { pbadslot: '/6355419/Travel/Europe/France/Paris' } },
+          }
+        })];
+        let placementInfo = buildAndGetPlacementInfo(bidArray);
+        expect(placementInfo).to.include('"gpid":"/6355419/Travel/Europe/France/Paris"');
+      });
     });
 
     describe('Instream video:', function () {
@@ -430,6 +440,33 @@ describe('YieldmoAdapter', function () {
       it('should have 0 bidfloor value by default', function() {
         const requests = build([mockVideoBid()]);
         expect(requests[0].data.imp[0].bidfloor).to.equal(0);
+      });
+
+      it('should add schain if it is in the bidRequest', () => {
+        const schain = {
+          ver: '1.0',
+          complete: 1,
+          nodes: [{
+            asi: 'indirectseller.com',
+            sid: '00001',
+            hp: 1
+          }],
+        };
+        expect(buildAndGetData([mockVideoBid({schain})]).schain).to.deep.equal(schain);
+      });
+
+      it('should add ip to the video bidRequest', () => {
+        const device = {
+          ip: '111.222.333.444'
+        };
+        expect(buildAndGetData([mockVideoBid(null, {device})]).device.ip).to.be.equal(device.ip);
+      });
+
+      it('should add gpid to the video request', function () {
+        const ortb2Imp = {
+          ext: { data: { pbadslot: '/6355419/Travel/Europe/France/Paris' } },
+        };
+        expect(buildAndGetData([mockVideoBid({ortb2Imp})]).imp[0].ext.gpid).to.be.equal(ortb2Imp.ext.data.pbadslot);
       });
     });
   });
