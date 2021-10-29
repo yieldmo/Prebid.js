@@ -117,7 +117,7 @@ export const spec = {
       }
 
       serverRequests.push({
-        method: 'GET',
+        method: 'POST',
         url: BANNER_SERVER_ENDPOINT,
         data: serverRequest
       });
