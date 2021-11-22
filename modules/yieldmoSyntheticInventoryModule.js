@@ -2,6 +2,7 @@
 // import { resolve } from 'core-js/fn/promise';
 import { config } from '../src/config.js';
 import { isGptPubadsDefined, isFn } from '../src/utils.js';
+import strIncludes from 'core-js-pure/features/string/includes.js';
 
 export const MODULE_NAME = 'Yieldmo Synthetic Inventory Module';
 export const AD_SERVER_ENDPOINT = 'https://ads.yieldmo.com/v002/t_ads/ads';
@@ -99,7 +100,7 @@ function serialize(dataObj) {
   return str.join('&');
 }
 
-function processResponse (response) {
+function processResponse(response) {
   console.log('___res', response.status);
   let responseBody;
   try {
@@ -139,14 +140,9 @@ function lookupIabConsent(cmpSuccess, cmpError) {
 
     while (!cmpFrame) {
       try {
-        if (isFn(f.__tcfapi) || isFn(f.__cmp)) {
-          if (isFn(f.__tcfapi)) {
-            cmpVersion = 2;
-            cmpFunction = f.__tcfapi;
-          } else {
-            cmpVersion = 1;
-            cmpFunction = f.__cmp;
-          }
+        if (isFn(f.__tcfapi)) {
+          cmpVersion = 2;
+          cmpFunction = f.__tcfapi;
           cmpFrame = f;
           break;
         }
@@ -155,14 +151,6 @@ function lookupIabConsent(cmpSuccess, cmpError) {
       try {
         if (f.frames['__tcfapiLocator']) {
           cmpVersion = 2;
-          cmpFrame = f;
-          break;
-        }
-      } catch (e) { }
-
-      try {
-        if (f.frames['__cmpLocator']) {
-          cmpVersion = 1;
           cmpFrame = f;
           break;
         }
@@ -177,7 +165,7 @@ function lookupIabConsent(cmpSuccess, cmpError) {
     };
   }
 
-  function v2CmpResponseCallback(tcfData, success) {
+  function cmpResponseCallback(tcfData, success) {
     console.log('Received a response from CMP', tcfData, success);
     if (success) {
       setTimeout(() => {
@@ -194,29 +182,6 @@ function lookupIabConsent(cmpSuccess, cmpError) {
     }
   }
 
-  function handleV1CmpResponseCallbacks() {
-    const cmpResponse = {};
-
-    function afterEach() {
-      if (cmpResponse.getConsentData && cmpResponse.getVendorConsents) {
-        console.log('Received all requested responses from CMP', cmpResponse);
-        cmpSuccess(cmpResponse);
-      }
-    }
-
-    return {
-      consentDataCallback: function (consentResponse) {
-        cmpResponse.getConsentData = consentResponse;
-        afterEach();
-      },
-      vendorConsentsCallback: function (consentResponse) {
-        cmpResponse.getVendorConsents = consentResponse;
-        afterEach();
-      }
-    }
-  }
-
-  let v1CallbackHandler = handleV1CmpResponseCallbacks();
   let { cmpFrame, cmpFunction } = findCMP();
 
   if (!cmpFrame) {
@@ -225,13 +190,39 @@ function lookupIabConsent(cmpSuccess, cmpError) {
 
   if (isFn(cmpFunction)) {
     console.log('Detected CMP API is directly accessible, calling it now...');
-    if (cmpVersion === 1) {
-      console.log('cmp1');
-      cmpFunction('getConsentData', null, v1CallbackHandler.consentDataCallback);
-      cmpFunction('getVendorConsents', null, v1CallbackHandler.vendorConsentsCallback);
-    } else if (cmpVersion === 2) {
-      console.log('cmp2');
-      cmpFunction('addEventListener', cmpVersion, v2CmpResponseCallback);
+    cmpFunction('addEventListener', cmpVersion, cmpResponseCallback);
+  } else {
+    callCmpWhileInIframe('addEventListener', cmpFrame, cmpResponseCallback);
+  }
+
+  function callCmpWhileInIframe(commandName, cmpFrame, moduleCallback) {
+    let apiName = '__tcfapi';
+    let callName = `${apiName}Call`;
+    let callId = Math.random() + '';
+    let msg = {
+      [callName]: {
+        command: commandName,
+        version: cmpVersion,
+        parameter: undefined,
+        callId: callId
+      }
+    };
+
+    cmpFrame.postMessage(msg, '*');
+
+    /** when we get the return message, call the stashed callback */
+    window.addEventListener('message', readPostMessageResponse, false);
+
+    function readPostMessageResponse(event) {
+      let cmpDataPkgName = `${apiName}Return`;
+      let json = (typeof event.data === 'string' && strIncludes(event.data, cmpDataPkgName)) ? JSON.parse(event.data) : event.data;
+      if (json[cmpDataPkgName] && json[cmpDataPkgName].callId) {
+        let payload = json[cmpDataPkgName];
+
+        if (payload.callId === callId) {
+          moduleCallback(payload.returnValue, payload.success);
+        }
+      }
     }
   }
 }
@@ -301,6 +292,40 @@ function lookupUspConsent(uspSuccess, uspError) {
       USPAPI_VERSION,
       callbackHandler.consentDataCallback
     );
+  } else {
+    console.log(
+      'Detected USP CMP is outside the current iframe where Prebid.js is located, calling it now...'
+    );
+    callUspApiWhileInIframe(
+      'getUSPData',
+      uspapiFrame,
+      callbackHandler.consentDataCallback
+    );
+  }
+
+  function callUspApiWhileInIframe(commandName, uspapiFrame, moduleCallback) {
+    let callId = Math.random() + '';
+    let msg = {
+      __uspapiCall: {
+        command: commandName,
+        version: USPAPI_VERSION,
+        callId: callId,
+      },
+    };
+
+    uspapiFrame.postMessage(msg, '*');
+
+    /** when we get the return message, call the stashed callback */
+    window.addEventListener('message', readPostMessageResponse, false);
+
+    function readPostMessageResponse(event) {
+      const res = event && event.data && event.data.__uspapiReturn;
+      if (res && res.callId) {
+        if (res.callId === callId) {
+          moduleCallback(res.returnValue, res.success);
+        }
+      }
+    }
   }
 }
 
