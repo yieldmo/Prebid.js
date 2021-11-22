@@ -26,6 +26,19 @@ const setGoogletag = () => {
   return window.googletag;
 }
 
+const getQuearyParamsFromUrl = (url) =>
+  [...new URL(url).searchParams]
+    .reduce(
+      (agg, param) => {
+        const [key, value] = param;
+
+        agg[key] = value;
+
+        return agg;
+      },
+      {}
+    );
+
 describe('Yieldmo Synthetic Inventory Module', function() {
   let config = Object.assign({}, mockedYmConfig);
   let googletagBkp;
@@ -39,18 +52,12 @@ describe('Yieldmo Synthetic Inventory Module', function() {
     window.googletag = googletagBkp;
   });
 
-  it('should be enabled with valid required params', function() {
-    expect(function () {
-      init(mockedYmConfig);
-    }).not.to.throw()
-  });
-
   it('should throw an error if placementId is missed', function() {
     const {placementId, ...config} = mockedYmConfig;
 
     expect(function () {
       validateConfig(config);
-    }).throw(`${MODULE_NAME}: placementId required`)
+    }).throw(`${MODULE_NAME}: placementId required`);
   });
 
   it('should throw an error if adUnitPath is missed', function() {
@@ -58,7 +65,7 @@ describe('Yieldmo Synthetic Inventory Module', function() {
 
     expect(function () {
       validateConfig(config);
-    }).throw(`${MODULE_NAME}: adUnitPath required`)
+    }).throw(`${MODULE_NAME}: adUnitPath required`);
   });
 
   describe('getAd', () => {
@@ -79,7 +86,7 @@ describe('Yieldmo Synthetic Inventory Module', function() {
       }]
     };
 
-    before(() => {
+    beforeEach(() => {
       window.XMLHttpRequest = function FakeXMLHttpRequest() {
         this.open = requestMock.open;
         this.send = requestMock.send;
@@ -87,21 +94,20 @@ describe('Yieldmo Synthetic Inventory Module', function() {
         adServerRequest = this;
       };
 
-      clock = sinon.useFakeTimers();
-      clock.reset();
-      Object.defineProperty(window.navigator, 'connection', { value: {}, writable: true });
-    });
-
-    beforeEach(() => {
       response = {
         target: {
           responseText: JSON.stringify(responseData),
           status: 200,
         }
       };
+
+      clock = sinon.useFakeTimers();
+      Object.defineProperty(window.navigator, 'connection', { value: {}, writable: true });
     });
 
     afterEach(() => {
+      window.XMLHttpRequest = originalXMLHttpRequest;
+
       requestMock.open.resetBehavior();
       requestMock.open.resetHistory();
       requestMock.send.resetBehavior();
@@ -113,9 +119,8 @@ describe('Yieldmo Synthetic Inventory Module', function() {
     });
 
     after(() => {
-      window.XMLHttpRequest = originalXMLHttpRequest;
       window.navigator.connection = originalConnection;
-    })
+    });
 
     it('should open ad request to ad server', () => {
       init(mockedYmConfig);
@@ -133,33 +138,21 @@ describe('Yieldmo Synthetic Inventory Module', function() {
 
       init(mockedYmConfig);
 
-      const queryParams = [...(new URL(requestMock.open.getCall(0).args[1])).searchParams]
-        .reduce(
-          (agg, param) => {
-            const [key, value] = param;
-
-            agg[key] = value;
-
-            return agg;
-          },
-          {}
-        );
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
 
       const timeStamp = queryParams.bust;
 
       expect(queryParams).to.deep.equal({
         _s: '1',
-        bust: timeStamp,
-        ct: timeStamp,
         dnt: 'false',
         e: '4',
         h: `${pageDimensions.height}`,
         p: mockedYmConfig.placementId,
         page_url: window.top.location.href,
-        pft: timeStamp,
         pr: window.top.location.href,
         scrd: `${pageDimensions.density}`,
         w: `${pageDimensions.width}`,
+        title: document.title,
       });
     });
 
@@ -204,7 +197,7 @@ describe('Yieldmo Synthetic Inventory Module', function() {
     it('should store ad response in window object', () => {
       init(mockedYmConfig);
 
-      adServerRequest.onload(response)
+      adServerRequest.onload(response);
 
       expect(window.__ymAds).to.deep.equal(responseData);
     });
@@ -215,7 +208,7 @@ describe('Yieldmo Synthetic Inventory Module', function() {
 
       init(mockedYmConfig);
 
-      adServerRequest.onload(response)
+      adServerRequest.onload(response);
 
       expect(gtag.cmd.length).to.equal(1);
 
@@ -239,14 +232,50 @@ describe('Yieldmo Synthetic Inventory Module', function() {
   });
 
   describe('lookupIabConsent', () => {
+    const callId = Math.random();
     const cmpFunction = sinon.stub();
+    const originalXMLHttpRequest = window.XMLHttpRequest;
+    let requestMock = {
+      open: sinon.stub(),
+      send: sinon.stub(),
+    };
+    let clock;
+    let postMessageStub;
+    let mathRandomStub;
+    let addEventListenerStub;
 
-    afterEach(() => {
-      cmpFunction.resetBehavior();
-      cmpFunction.resetHistory();
+    beforeEach(() => {
+      postMessageStub = sinon.stub(window, 'postMessage');
+      mathRandomStub = sinon.stub(Math, 'random');
+      addEventListenerStub = sinon.stub(window, 'addEventListener');
+
+      window.XMLHttpRequest = function FakeXMLHttpRequest() {
+        this.open = requestMock.open;
+        this.send = requestMock.send;
+      };
+
+      clock = sinon.useFakeTimers();
     });
 
-    it('should get cmp function from __tcfapi', () => {
+    afterEach(() => {
+      window.XMLHttpRequest = originalXMLHttpRequest;
+
+      postMessageStub.restore();
+      mathRandomStub.restore();
+      addEventListenerStub.restore();
+
+      cmpFunction.resetBehavior();
+      cmpFunction.resetHistory();
+
+      requestMock.open.resetBehavior();
+      requestMock.open.resetHistory();
+      requestMock.send.resetBehavior();
+      requestMock.send.resetHistory();
+
+      clock.restore();
+    });
+
+    it('should get cmp function', () => {
       window.__tcfapi = cmpFunction;
 
       init(mockedYmConfig);
@@ -256,39 +285,123 @@ describe('Yieldmo Synthetic Inventory Module', function() {
       expect(cmpFunction.calledOnceWith('addEventListener', 2)).to.be.true;
     });
 
-    it('should get cmp function from __cmp', () => {
-      window.__cmp = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__cmp = undefined;
-
-      expect(cmpFunction.callCount).to.be.equal(2);
-      expect(cmpFunction.calledWith('getConsentData', null)).to.be.true;
-      expect(cmpFunction.calledWith('getVendorConsents', null)).to.be.true;
-    });
-
-    it('should get cmp function from __cmp', () => {
-      const getConsentDataStub = sinon.stub();
-      const getVendorConsentsStub = sinon.stub();
-
-      cmpFunction.callsFake((event, version, callback) => {
-        if (event === 'getConsentData') {
-          callback(getConsentDataStub)
-        } else {
-          callback(getVendorConsentsStub)
-        }
+    it('should call api without cmp consent if can not get it', () => {
+      cmpFunction.callsFake((e, version, callback) => {
+        callback(undefined, false);
       });
 
-      window.__cmp = cmpFunction;
+      window.__tcfapi = cmpFunction;
 
       init(mockedYmConfig);
 
-      window.__cmp = undefined;
+      window.__tcfapi = undefined;
 
-      expect(cmpFunction.callCount).to.be.equal(2);
-      expect(cmpFunction.calledWith('getConsentData', null)).to.be.true;
-      expect(cmpFunction.calledWith('getVendorConsents', null)).to.be.true;
+      expect(requestMock.open.calledOnce).to.be.true;
+    });
+
+    it('should add cmp consent string to ad server request params if gdprApplies is false', () => {
+      const tcfData = { gdprApplies: false, tcString: 'testTcString' };
+
+      cmpFunction.callsFake((e, version, callback) => {
+        callback(tcfData, true);
+      });
+
+      window.__tcfapi = cmpFunction;
+
+      init(mockedYmConfig);
+
+      window.__tcfapi = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
+    });
+
+    it('should add cmp consent string to ad server request params if eventStatus is tcloaded', () => {
+      const tcfData = { eventStatus: 'tcloaded', tcString: 'testTcString' };
+
+      cmpFunction.callsFake((e, version, callback) => {
+        callback(tcfData, true);
+      });
+
+      window.__tcfapi = cmpFunction;
+
+      init(mockedYmConfig);
+
+      window.__tcfapi = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
+    });
+
+    it('should add cmp consent string to ad server request params if eventStatus is useractioncomplete', () => {
+      const tcfData = { eventStatus: 'useractioncomplete', tcString: 'testTcString' };
+
+      cmpFunction.callsFake((e, version, callback) => {
+        callback(tcfData, true);
+      });
+
+      window.__tcfapi = cmpFunction;
+
+      init(mockedYmConfig);
+
+      window.__tcfapi = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
+    });
+
+    it('should post message if cmp consent is loaded from another iframe', () => {
+      window.frames['__tcfapiLocator'] = 'cmpframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__tcfapiLocator'] = undefined;
+
+      expect(window.postMessage.callCount).to.be.equal(1);
+    });
+
+    it('should add event listener for message event if usp consent is loaded from another iframe', () => {
+      window.frames['__tcfapiLocator'] = 'cmpframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__tcfapiLocator'] = undefined;
+
+      expect(window.addEventListener.calledOnceWith('message')).to.be.true;
+    });
+
+    it('should add cmp consent string to ad server request params when called from iframe', () => {
+      const callId = Math.random();
+      const tcfData = { gdprApplies: false, tcString: 'testTcString' };
+      const cmpEvent = {
+        data: {
+          __tcfapiReturn: {
+            callId: `${callId}`,
+            returnValue: tcfData,
+            success: true,
+          }
+        },
+      };
+
+      mathRandomStub.returns(callId);
+      addEventListenerStub.callsFake(
+        (e, callback) => {
+          callback(cmpEvent)
+        }
+      );
+
+      window.frames['__tcfapiLocator'] = 'cmpframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__tcfapiLocator'] = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
     });
   });
 });
