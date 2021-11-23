@@ -404,4 +404,141 @@ describe('Yieldmo Synthetic Inventory Module', function() {
       expect(queryParams.cmp).to.be.equal(tcfData.tcString);
     });
   });
+
+  describe('lookupUspConsent', () => {
+    const callId = Math.random();
+    const uspFunction = sinon.stub();
+    const originalXMLHttpRequest = window.XMLHttpRequest;
+    let requestMock = {
+      open: sinon.stub(),
+      send: sinon.stub(),
+    };
+    let clock;
+    let postMessageStub;
+    let mathRandomStub;
+    let addEventListenerStub;
+
+    beforeEach(() => {
+      postMessageStub = sinon.stub(window, 'postMessage');
+      mathRandomStub = sinon.stub(Math, 'random');
+      addEventListenerStub = sinon.stub(window, 'addEventListener');
+
+      window.XMLHttpRequest = function FakeXMLHttpRequest() {
+        this.open = requestMock.open;
+        this.send = requestMock.send;
+      };
+
+      clock = sinon.useFakeTimers();
+    });
+
+    afterEach(() => {
+      window.XMLHttpRequest = originalXMLHttpRequest;
+
+      postMessageStub.restore();
+      mathRandomStub.restore();
+      addEventListenerStub.restore();
+
+      uspFunction.resetBehavior();
+      uspFunction.resetHistory();
+
+      requestMock.open.resetBehavior();
+      requestMock.open.resetHistory();
+      requestMock.send.resetBehavior();
+      requestMock.send.resetHistory();
+
+      clock.restore();
+    });
+
+    it('should get cmp function', () => {
+      window.__uspapi = uspFunction;
+
+      init(mockedYmConfig);
+
+      window.__uspapi = undefined;
+
+      expect(uspFunction.calledOnceWith('getUSPData', 1)).to.be.true;
+    });
+
+    it('should call api without usp consent if can not get it', () => {
+      uspFunction.callsFake((e, version, callback) => {
+        callback(undefined, false);
+      });
+
+      window.__uspapi = uspFunction;
+
+      init(mockedYmConfig);
+
+      window.__uspapi = undefined;
+
+      expect(requestMock.open.calledOnce).to.be.true;
+    });
+
+    it('should add usp consent string to ad server request params', () => {
+      const uspData = { uspString: 'testUspString' };
+
+      uspFunction.callsFake((e, version, callback) => {
+        callback(uspData, true);
+      });
+
+      window.__uspapi = uspFunction;
+
+      init(mockedYmConfig);
+
+      window.__uspapi = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.us_privacy).to.be.equal(uspData.uspString);
+    });
+
+    it('should post message if usp consent is loaded from another iframe', () => {
+      window.frames['__uspapiLocator'] = 'uspframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__uspapiLocator'] = undefined;
+
+      expect(window.postMessage.callCount).to.be.equal(1);
+    });
+
+    it('should add event listener for message event if usp consent is loaded from another iframe', () => {
+      window.frames['__uspapiLocator'] = 'uspframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__uspapiLocator'] = undefined;
+
+      expect(window.addEventListener.calledOnceWith('message')).to.be.true;
+    });
+
+    it('should add usp consent string to ad server request params when called from iframe', () => {
+      const uspData = { uspString: 'testUspString' };
+      const uspEvent = {
+        data: {
+          __uspapiReturn: {
+            callId: `${callId}`,
+            returnValue: uspData,
+            success: true,
+          }
+        },
+      };
+
+      mathRandomStub.returns(callId);
+      addEventListenerStub.callsFake(
+        (e, callback) => {
+          callback(uspEvent)
+        }
+      );
+
+      window.frames['__uspapiLocator'] = 'cmpframe';
+
+      init(mockedYmConfig);
+
+      window.frames['__uspapiLocator'] = undefined;
+
+      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
+
+      expect(queryParams.us_privacy).to.be.equal(uspData.uspString);
+    });
+  });
 });
