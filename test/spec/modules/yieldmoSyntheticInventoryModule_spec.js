@@ -1,10 +1,7 @@
 import { expect } from 'chai';
 import * as ajax from 'src/ajax.js';
-import {
-  init,
-  MODULE_NAME,
-  validateConfig
-} from 'modules/yieldmoSyntheticInventoryModule';
+import { testExports } from 'modules/yieldmoSyntheticInventoryModule';
+import { config } from 'src/config.js';
 
 const mockedYmConfig = {
   placementId: '123456',
@@ -41,43 +38,69 @@ const getQuearyParamsFromUrl = (url) =>
     );
 
 describe('Yieldmo Synthetic Inventory Module', function() {
-  let config = Object.assign({}, mockedYmConfig);
   let googletagBkp;
+  let sandbox;
 
   beforeEach(function () {
     googletagBkp = window.googletag;
     delete window.googletag;
+    sandbox = sinon.sandbox.create();
   });
 
   afterEach(function () {
     window.googletag = googletagBkp;
+    sandbox.restore();
   });
 
-  it('should throw an error if placementId is missed', function() {
-    const {placementId, ...config} = mockedYmConfig;
+  describe('Module config initialization', () => {
+    it('getConfigs should call config.getConfig twice to get yieldmoSyntheticInventory and consentManagement configs', function() {
+      const getConfigStub = sandbox.stub(config, 'getConfig').returns({});
 
-    expect(function () {
-      validateConfig(config);
-    }).throw(`${MODULE_NAME}: placementId required`);
+      return testExports.getConfigs()
+        .catch(() => {
+          expect(getConfigStub.calledWith('yieldmoSyntheticInventory')).to.equal(true);
+          expect(getConfigStub.calledWith('consentManagement')).to.equal(true);
+        });
+    });
+
+    it('should throw an error if config.placementId is missing', function() {
+      const { placementId, ...rest } = mockedYmConfig;
+
+      expect(function () {
+        testExports.validateConfig(rest);
+      }).throw(`${testExports.MODULE_NAME}: placementId required`);
+    });
+
+    it('should throw an error if config.adUnitPath is missing', function() {
+      const { adUnitPath, ...rest } = mockedYmConfig;
+
+      expect(function () {
+        testExports.validateConfig(rest);
+      }).throw(`${testExports.MODULE_NAME}: adUnitPath required`);
+    });
   });
 
-  it('should throw an error if adUnitPath is missed', function() {
-    const {adUnitPath, ...config} = mockedYmConfig;
+  describe('getConsentData', () => {
+    it('should always resolves with object contained "cmp" and "usp" keys', () => {
+      const consentDataMock = {
+        cmp: null,
+        usp: null
+      };
 
-    expect(function () {
-      validateConfig(config);
-    }).throw(`${MODULE_NAME}: adUnitPath required`);
+      return testExports.getConsentData()
+        .then(consentDataObj =>
+          expect(consentDataObj).to.eql(consentDataMock));
+    });
   });
 
-  describe('Ajax ad request', () => {
+  describe('Get ad', () => {
     let sandbox;
 
     const setAjaxStub = (cb) => {
       const ajaxStub = sandbox.stub().callsFake(cb);
       sandbox.stub(ajax, 'ajaxBuilder').callsFake(() => ajaxStub);
       return ajaxStub;
-    }
-
+    };
     const responseData = {
       data: [{
         ads: [{
@@ -94,86 +117,89 @@ describe('Yieldmo Synthetic Inventory Module', function() {
       sandbox.restore();
     });
 
-    it('should open ad request to ad server', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {});
+    it('should make ad request to ad server', () => {
+      const ajaxStub = setAjaxStub((url, callbackObj) => {
+        callbackObj.success('', {responseText: '', status: 200});
+      });
 
-      init(mockedYmConfig);
-
-      expect((new URL(ajaxStub.getCall(0).args[0])).host).to.be.equal('ads.yieldmo.com');
+      return testExports.getAd(mockedYmConfig, {cmp: null, usp: null})
+        .then(res => { expect(ajaxStub.calledOnce).to.be.true });
     });
 
-    it('should properly combine ad request query', () => {
+    it('should throw an error if server returns an error', () => {
+      const response = {status: 500};
+      const ajaxStub = setAjaxStub((url, callbackObj) => {
+        callbackObj.error('', { status: 500 });
+      });
+
+      return testExports.getAd(mockedYmConfig, {cmp: null, usp: null})
+        .catch(err => {
+          expect(err.message).to.be.equal(`${testExports.MODULE_NAME}: ad server error: ${response.status}`)
+        });
+    });
+
+    it('should properly create ad request url', () => {
       const title = 'Test title value';
-      const ajaxStub = setAjaxStub((url, callbackObj) => {});
+      const ajaxStub = setAjaxStub((url, callbackObj) => {
+        callbackObj.success('', {responseText: '', status: 200});
+      });
       const documentStubTitle = sandbox.stub(document, 'title').value(title);
       const connection = window.navigator.connection || {};
 
-      init(mockedYmConfig);
-      const queryParams = getQuearyParamsFromUrl(ajaxStub.getCall(0).args[0]);
-      const timeStamp = queryParams.bust;
+      return testExports.getAd(mockedYmConfig, {cmp: null, usp: null})
+        .then(res => {
+          const queryParams = getQuearyParamsFromUrl(ajaxStub.getCall(0).args[0]);
+          const timeStamp = queryParams.bust;
 
-      const paramsToCompare = {
-        title,
-        _s: '1',
-        dnt: 'false',
-        e: '4',
-        p: mockedYmConfig.placementId,
-        page_url: window.top.location.href,
-        pr: window.top.location.href,
-        bust: timeStamp,
-        pft: timeStamp,
-        ct: timeStamp,
-        connect: typeof connection.effectiveType !== 'undefined' ? connection.effectiveType : undefined,
-        bwe: typeof connection.downlink !== 'undefined' ? connection.downlink + 'Mb/sec' : undefined,
-        rtt: typeof connection.rtt !== 'undefined' ? String(connection.rtt) : undefined,
-        sd: typeof connection.saveData !== 'undefined' ? String(connection.saveData) : undefined,
-        scrd: String(window.top.devicePixelRatio || 0),
-        h: String(window.top.screen.height || window.screen.top.availHeight || window.top.outerHeight || window.top.innerHeight || 481),
-        w: String(window.top.screen.width || window.screen.top.availWidth || window.top.outerWidth || window.top.innerWidth || 321),
-      };
+          const paramsToCompare = {
+            title,
+            _s: '1',
+            dnt: 'false',
+            e: '4',
+            p: mockedYmConfig.placementId,
+            page_url: window.top.location.href,
+            pr: window.top.location.href,
+            bust: timeStamp,
+            pft: timeStamp,
+            ct: timeStamp,
+            connect: typeof connection.effectiveType !== 'undefined' ? connection.effectiveType : undefined,
+            bwe: typeof connection.downlink !== 'undefined' ? connection.downlink + 'Mb/sec' : undefined,
+            rtt: typeof connection.rtt !== 'undefined' ? String(connection.rtt) : undefined,
+            sd: typeof connection.saveData !== 'undefined' ? String(connection.saveData) : undefined,
+            scrd: String(window.top.devicePixelRatio || 0),
+            h: String(window.top.screen.height || window.screen.top.availHeight || window.top.outerHeight || window.top.innerHeight || 481),
+            w: String(window.top.screen.width || window.screen.top.availWidth || window.top.outerWidth || window.top.innerWidth || 321),
+          };
 
-      expect(queryParams).to.eql(JSON.parse(JSON.stringify(paramsToCompare)));
+          expect(queryParams).to.eql(JSON.parse(JSON.stringify(paramsToCompare)));
+        })
+        .catch(err => { throw err; });
+    });
+  });
+
+  describe('setAd', () => {
+    let sandbox;
+
+    const setAjaxStub = (cb) => {
+      const ajaxStub = sandbox.stub().callsFake(cb);
+      sandbox.stub(ajax, 'ajaxBuilder').callsFake(() => ajaxStub);
+      return ajaxStub;
+    }
+
+    beforeEach(() => {
+      sandbox = sinon.sandbox.create();
     });
 
-    it('should send ad request to ad server', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {});
-
-      init(mockedYmConfig);
-
-      expect(ajaxStub.calledOnce).to.be.true;
+    afterEach(() => {
+      sandbox.restore();
     });
 
-    it('should throw an error if can not parse response', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {
-        callbackObj.success('', {responseText: '__invalid_JSON__', status: 200});
-      });
+    it('should set window.top.googletag and window.top.googletag.cmd', () => {
+      expect(window.top.googletag).to.be.undefined;
 
-      expect(() => init(mockedYmConfig)).to.throw('Yieldmo Synthetic Inventory Module: response is not valid JSON');
-    });
+      testExports.setGoogleTag();
 
-    it('should throw an error if status is 204', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {
-        callbackObj.success('', {status: 204, responseText: '{}'});
-      });
-
-      expect(() => init(mockedYmConfig)).to.throw('Yieldmo Synthetic Inventory Module: no content success status');
-    });
-
-    it('should throw an error if error_code present in the ad response', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {
-        callbackObj.success('', {status: 200, responseText: '{"data": [{"error_code": "NOAD"}]}'});
-      });
-
-      expect(() => init(mockedYmConfig)).to.throw('Yieldmo Synthetic Inventory Module: no ad, error_code: NOAD');
-    });
-
-    it('should store ad response in window object', () => {
-      const ajaxStub = setAjaxStub((url, callbackObj) => {
-        callbackObj.success(JSON.stringify(responseData), {status: 200, responseText: JSON.stringify(responseData)});
-      });
-
-      init(mockedYmConfig);
-      expect(window.top.__ymAds).to.deep.equal(responseData);
+      expect(window.top.googletag).to.be.eql({cmd: []});
     });
 
     it('should add correct googletag.cmd', function() {
@@ -184,7 +210,11 @@ describe('Yieldmo Synthetic Inventory Module', function() {
         callbackObj.success(JSON.stringify(responseData), {status: 200, responseText: '{"data": [{"ads": []}]}'});
       });
 
-      init(mockedYmConfig);
+      testExports.setAd(mockedYmConfig, {
+        responseText: `{
+          "data": []
+        }`
+      });
 
       expect(gtag.cmd.length).to.equal(1);
 
@@ -207,316 +237,34 @@ describe('Yieldmo Synthetic Inventory Module', function() {
     });
   });
 
-  describe('lookupIabConsent', () => {
-    const callId = Math.random();
-    const cmpFunction = sinon.stub();
-    const originalXMLHttpRequest = window.XMLHttpRequest;
-    let requestMock = {
-      open: sinon.stub(),
-      send: sinon.stub(),
-    };
-    let clock;
-    let postMessageStub;
-    let mathRandomStub;
-    let addEventListenerStub;
+  describe('processAdResponse', () => {
+    it('should throw if ad response has 204 code', () => {
+      const response = { status: 204 }
 
-    beforeEach(() => {
-      postMessageStub = sinon.stub(window, 'postMessage');
-      mathRandomStub = sinon.stub(Math, 'random');
-      addEventListenerStub = sinon.stub(window, 'addEventListener');
+      expect(() => testExports.processAdResponse(response))
+        .to.throw(`${testExports.MODULE_NAME}: ${response.status} - no ad to serve`)
+    });
 
-      window.XMLHttpRequest = function FakeXMLHttpRequest() {
-        this.open = requestMock.open;
-        this.send = requestMock.send;
-        this.setRequestHeader = () => {};
+    it('should throw if ad response has 204 code', () => {
+      const response = { status: 200, responseText: '__invalid_json__' }
+
+      expect(() => testExports.processAdResponse(response))
+        .to.throw(`${testExports.MODULE_NAME}: JSON validation error`)
+    });
+
+    it('should throw if ad response has error_code', () => {
+      const response = {
+        responseText: `{
+          "data": [
+            {
+              "error_code": "NOAD"
+            }
+          ]
+        }`
       };
 
-      clock = sinon.useFakeTimers();
-    });
-
-    afterEach(() => {
-      window.XMLHttpRequest = originalXMLHttpRequest;
-
-      postMessageStub.restore();
-      mathRandomStub.restore();
-      addEventListenerStub.restore();
-
-      cmpFunction.resetBehavior();
-      cmpFunction.resetHistory();
-
-      requestMock.open.resetBehavior();
-      requestMock.open.resetHistory();
-      requestMock.send.resetBehavior();
-      requestMock.send.resetHistory();
-
-      clock.restore();
-    });
-
-    it('should get cmp function', () => {
-      window.__tcfapi = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__tcfapi = undefined;
-
-      expect(cmpFunction.calledOnceWith('addEventListener', 2)).to.be.true;
-    });
-
-    it('should call api without cmp consent if can not get it', () => {
-      cmpFunction.callsFake((e, version, callback) => {
-        callback(undefined, false);
-      });
-
-      window.__tcfapi = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__tcfapi = undefined;
-
-      expect(requestMock.open.calledOnce).to.be.true;
-    });
-
-    it('should add cmp consent string to ad server request params if gdprApplies is false', () => {
-      const tcfData = { gdprApplies: false, tcString: 'testTcString' };
-
-      cmpFunction.callsFake((e, version, callback) => {
-        callback(tcfData, true);
-      });
-
-      window.__tcfapi = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__tcfapi = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
-    });
-
-    it('should add cmp consent string to ad server request params if eventStatus is tcloaded', () => {
-      const tcfData = { eventStatus: 'tcloaded', tcString: 'testTcString' };
-
-      cmpFunction.callsFake((e, version, callback) => {
-        callback(tcfData, true);
-      });
-
-      window.__tcfapi = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__tcfapi = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
-    });
-
-    it('should add cmp consent string to ad server request params if eventStatus is useractioncomplete', () => {
-      const tcfData = { eventStatus: 'useractioncomplete', tcString: 'testTcString' };
-
-      cmpFunction.callsFake((e, version, callback) => {
-        callback(tcfData, true);
-      });
-
-      window.__tcfapi = cmpFunction;
-
-      init(mockedYmConfig);
-
-      window.__tcfapi = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
-    });
-
-    it('should post message if cmp consent is loaded from another iframe', () => {
-      window.frames['__tcfapiLocator'] = 'cmpframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__tcfapiLocator'] = undefined;
-
-      expect(window.postMessage.callCount).to.be.equal(1);
-    });
-
-    it('should add event listener for message event if usp consent is loaded from another iframe', () => {
-      window.frames['__tcfapiLocator'] = 'cmpframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__tcfapiLocator'] = undefined;
-
-      expect(window.addEventListener.calledOnceWith('message')).to.be.true;
-    });
-
-    it('should add cmp consent string to ad server request params when called from iframe', () => {
-      const callId = Math.random();
-      const tcfData = { gdprApplies: false, tcString: 'testTcString' };
-      const cmpEvent = {
-        data: {
-          __tcfapiReturn: {
-            callId: `${callId}`,
-            returnValue: tcfData,
-            success: true,
-          }
-        },
-      };
-
-      mathRandomStub.returns(callId);
-      addEventListenerStub.callsFake(
-        (e, callback) => {
-          callback(cmpEvent)
-        }
-      );
-
-      window.frames['__tcfapiLocator'] = 'cmpframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__tcfapiLocator'] = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.cmp).to.be.equal(tcfData.tcString);
-    });
-  });
-
-  describe('lookupUspConsent', () => {
-    const callId = Math.random();
-    const uspFunction = sinon.stub();
-    const originalXMLHttpRequest = window.XMLHttpRequest;
-    let requestMock = {
-      open: sinon.stub(),
-      send: sinon.stub(),
-    };
-    let clock;
-    let postMessageStub;
-    let mathRandomStub;
-    let addEventListenerStub;
-
-    beforeEach(() => {
-      postMessageStub = sinon.stub(window, 'postMessage');
-      mathRandomStub = sinon.stub(Math, 'random');
-      addEventListenerStub = sinon.stub(window, 'addEventListener');
-
-      window.XMLHttpRequest = function FakeXMLHttpRequest() {
-        this.open = requestMock.open;
-        this.send = requestMock.send;
-        this.setRequestHeader = () => {};
-      };
-
-      clock = sinon.useFakeTimers();
-    });
-
-    afterEach(() => {
-      window.XMLHttpRequest = originalXMLHttpRequest;
-
-      postMessageStub.restore();
-      mathRandomStub.restore();
-      addEventListenerStub.restore();
-
-      uspFunction.resetBehavior();
-      uspFunction.resetHistory();
-
-      requestMock.open.resetBehavior();
-      requestMock.open.resetHistory();
-      requestMock.send.resetBehavior();
-      requestMock.send.resetHistory();
-
-      clock.restore();
-    });
-
-    it('should get cmp function', () => {
-      window.__uspapi = uspFunction;
-
-      init(mockedYmConfig);
-
-      window.__uspapi = undefined;
-
-      expect(uspFunction.calledOnceWith('getUSPData', 1)).to.be.true;
-    });
-
-    it('should call api without usp consent if can not get it', () => {
-      uspFunction.callsFake((e, version, callback) => {
-        callback(undefined, false);
-      });
-
-      window.__uspapi = uspFunction;
-
-      init(mockedYmConfig);
-
-      window.__uspapi = undefined;
-
-      expect(requestMock.open.calledOnce).to.be.true;
-    });
-
-    it('should add usp consent string to ad server request params', () => {
-      const uspData = { uspString: 'testUspString' };
-
-      uspFunction.callsFake((e, version, callback) => {
-        callback(uspData, true);
-      });
-
-      window.__uspapi = uspFunction;
-
-      init(mockedYmConfig);
-
-      window.__uspapi = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.us_privacy).to.be.equal(uspData.uspString);
-    });
-
-    it('should post message if usp consent is loaded from another iframe', () => {
-      window.frames['__uspapiLocator'] = 'uspframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__uspapiLocator'] = undefined;
-
-      expect(window.postMessage.callCount).to.be.equal(1);
-    });
-
-    it('should add event listener for message event if usp consent is loaded from another iframe', () => {
-      window.frames['__uspapiLocator'] = 'uspframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__uspapiLocator'] = undefined;
-
-      expect(window.addEventListener.calledOnceWith('message')).to.be.true;
-    });
-
-    it('should add usp consent string to ad server request params when called from iframe', () => {
-      const uspData = { uspString: 'testUspString' };
-      const uspEvent = {
-        data: {
-          __uspapiReturn: {
-            callId: `${callId}`,
-            returnValue: uspData,
-            success: true,
-          }
-        },
-      };
-
-      mathRandomStub.returns(callId);
-      addEventListenerStub.callsFake(
-        (e, callback) => {
-          callback(uspEvent)
-        }
-      );
-
-      window.frames['__uspapiLocator'] = 'cmpframe';
-
-      init(mockedYmConfig);
-
-      window.frames['__uspapiLocator'] = undefined;
-
-      const queryParams = getQuearyParamsFromUrl(requestMock.open.getCall(0).args[1]);
-
-      expect(queryParams.us_privacy).to.be.equal(uspData.uspString);
+      expect(() => testExports.processAdResponse(response))
+        .to.throw(`${testExports.MODULE_NAME}: no ad, error_code: ${JSON.parse(response.responseText).data[0].error_code}`)
     });
   });
 });

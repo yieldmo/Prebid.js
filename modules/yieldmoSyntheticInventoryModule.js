@@ -1,53 +1,74 @@
 import { config } from '../src/config.js';
-import { isGptPubadsDefined, isFn } from '../src/utils.js';
+import { isGptPubadsDefined } from '../src/utils.js';
 import * as ajax from '../src/ajax.js'
-import strIncludes from 'core-js-pure/features/string/includes.js';
+import { gdprDataHandler, uspDataHandler } from '../src/adapterManager.js';
 
-export const MODULE_NAME = 'Yieldmo Synthetic Inventory Module';
-export const AD_SERVER_ENDPOINT = 'https://ads.yieldmo.com/v002/t_ads/ads';
-const USPAPI_VERSION = 1;
+const MODULE_NAME = 'yieldmoSyntheticInventory';
+const AD_SERVER_ENDPOINT = 'https://ads.yieldmo.com/v002/t_ads/ads';
+const GET_CONFIG_TIMEOUT = 10; // might be 0, 10 just in case
 
-let cmpVersion = 0;
-let cmpResolved = false;
+export const testExports = {
+  MODULE_NAME,
+  validateConfig,
+  setGoogleTag,
+  setAd,
+  getConsentData,
+  getConfigs,
+  processAdResponse,
+  getAd
+};
 
-export function init(config) {
-  checkSandbox(window);
-  validateConfig(config);
-
-  const consentData = () => {
-    const consentDataObj = {};
-    return (api, result) => {
-      consentDataObj[api] = result;
-      if ('cmp' in consentDataObj && 'usp' in consentDataObj) {
-        if (!isGptPubadsDefined()) {
-          window.top.googletag = window.top.googletag || {};
-          window.top.googletag.cmd = window.top.googletag.cmd || [];
-        }
-        ajax.ajaxBuilder()(`${AD_SERVER_ENDPOINT}?${serialize(collectData(config.placementId, consentDataObj))}`, {
-          success: (responceText, responseObj) => {
-            window.top.__ymAds = processResponse(responseObj);
-            const googletag = window.top.googletag;
-            googletag.cmd.push(() => {
-              if (window.top.document.body) {
-                googletagCmd(config, googletag);
-              } else {
-                window.top.document.addEventListener('DOMContentLoaded', () => googletagCmd(config, googletag));
-              }
-            });
-          },
-          error: (message, err) => {
-            throw err;
-          }
+function getConsentData() {
+  return new Promise((resolve) => {
+    Promise.allSettled([
+      gdprDataHandler.promise,
+      uspDataHandler.promise
+    ])
+      .then(([ cmp, usp ]) => {
+        resolve({
+          cmp: cmp.value,
+          usp: usp.value
         });
-      }
-    }
-  };
-  const consentDataHandler = consentData();
-  lookupIabConsent((a) => consentDataHandler('cmp', a), (e) => consentDataHandler('cmp', false));
-  lookupUspConsent((a) => consentDataHandler('usp', a), (e) => consentDataHandler('usp', false));
+      })
+  });
 }
 
-export function validateConfig(config) {
+function setGoogleTag() {
+  if (!isGptPubadsDefined()) {
+    window.top.googletag = window.top.googletag || {};
+    window.top.googletag.cmd = window.top.googletag.cmd || [];
+  }
+}
+
+function setAd(config, ad) {
+  window.top.__ymAds = processAdResponse(ad);
+  const googletag = window.top.googletag;
+  googletag.cmd.push(() => {
+    if (window.top.document.body) {
+      googletagCmd(config, googletag);
+    } else {
+      window.top.document.addEventListener('DOMContentLoaded', () => googletagCmd(config, googletag));
+    }
+  });
+}
+
+function getAd(config, consentData) {
+  const url = `${AD_SERVER_ENDPOINT}?${serialize(collectData(config.placementId, consentData))}`;
+  return new Promise((resolve, reject) =>
+    ajax.ajaxBuilder()(url, {
+      success: (responseText, responseObj) => {
+        resolve(responseObj);
+      },
+      error: (message, err) => {
+        reject(new Error(`${MODULE_NAME}: ad server error: ${err.status}`));
+      }
+    }))
+    .catch(err => {
+      throw err;
+    });
+}
+
+function validateConfig(config) {
   if (!('placementId' in config)) {
     throw new Error(`${MODULE_NAME}: placementId required`);
   }
@@ -93,8 +114,8 @@ function collectData(placementId, consentDataObj) {
     bwe: typeof connection.downlink !== 'undefined' ? connection.downlink + 'Mb/sec' : undefined,
     rtt: typeof connection.rtt !== 'undefined' ? String(connection.rtt) : undefined,
     sd: typeof connection.saveData !== 'undefined' ? String(connection.saveData) : undefined,
-    us_privacy: (consentDataObj.usp && consentDataObj.usp.usPrivacy) || '',
-    cmp: (consentDataObj.cmp && consentDataObj.cmp.tcString) || ''
+    us_privacy: consentDataObj.usp || '',
+    cmp: (consentDataObj.cmp && consentDataObj.cmp.consentString) || ''
   };
 }
 
@@ -108,15 +129,19 @@ function serialize(dataObj) {
   return str.join('&');
 }
 
-function processResponse(res) {
+function processAdResponse(res) {
+  if (res.status >= 300) {
+    throw new Error(`${MODULE_NAME}: ad server error: ${res.status}`);
+    // 204 is a valid response, but we're throwing because it's always good to know
+    // probably something has been wrong configured (placementId / adUnitPath / userConsent ...)
+  } else if (res.status === 204) {
+    throw new Error(`${MODULE_NAME}: ${res.status} - no ad to serve`);
+  }
   let parsedResponseBody;
   try {
     parsedResponseBody = JSON.parse(res.responseText);
   } catch (err) {
-    throw new Error(`${MODULE_NAME}: response is not valid JSON`);
-  }
-  if (res && res.status === 204) {
-    throw new Error(`${MODULE_NAME}: no content success status`);
+    throw new Error(`${MODULE_NAME}: JSON validation error`);
   }
   if (parsedResponseBody.data && parsedResponseBody.data.length && parsedResponseBody.data[0].error_code) {
     throw new Error(`${MODULE_NAME}: no ad, error_code: ${parsedResponseBody.data[0].error_code}`);
@@ -131,194 +156,47 @@ function checkSandbox(w) {
     throw new Error(`${MODULE_NAME}: module was placed in the sandbox iframe`);
   }
 }
+/**
+ * Configs will be available only next JS event loop iteration after calling config.getConfig,
+ * but... if user won't provide the configs, callback will never be executed
+ * because of that we're using promises for the code readability (to prevent callback hell),
+ * and setTimeout(__, 0) as a fallback in case configs wasn't provided...
+*/
+function getConfigs() {
+  const promisifyGetConfig = configName =>
+    new Promise((resolve) =>
+      config.getConfig(configName, config => resolve(config)));
 
-function lookupIabConsent(cmpSuccess, cmpError) {
-  function findCMP() {
-    let f = window;
-    let cmpFrame;
-    let cmpFunction;
-
-    while (!cmpFrame) {
-      try {
-        if (isFn(f.__tcfapi)) {
-          cmpVersion = 2;
-          cmpFunction = f.__tcfapi;
-          cmpFrame = f;
-          continue;
-        }
-      } catch (e) { }
-
-      try {
-        if (f.frames['__tcfapiLocator']) {
-          cmpVersion = 2;
-          cmpFrame = f;
-          continue;
-        }
-      } catch (e) { }
-
-      if (f === window.top) break;
-      f = f.parent;
-    }
-    return {
-      cmpFrame,
-      cmpFunction
-    };
-  }
-
-  function cmpResponseCallback(tcfData, success) {
-    if (success) {
-      setTimeout(() => {
-        if (!cmpResolved) {
-          cmpSuccess(tcfData);
-        }
-      }, 3000);
-      if (tcfData.gdprApplies === false || tcfData.eventStatus === 'tcloaded' || tcfData.eventStatus === 'useractioncomplete') {
-        cmpSuccess(tcfData);
-        cmpResolved = true;
-      }
-    } else {
-      cmpError('CMP unable to register callback function.  Please check CMP setup.');
-    }
-  }
-
-  let { cmpFrame, cmpFunction } = findCMP();
-
-  if (!cmpFrame) {
-    return cmpError('CMP not found.');
-  }
-
-  if (isFn(cmpFunction)) {
-    cmpFunction('addEventListener', cmpVersion, cmpResponseCallback);
-  } else {
-    callCmpWhileInIframe('addEventListener', cmpFrame, cmpResponseCallback);
-  }
-
-  function callCmpWhileInIframe(commandName, cmpFrame, moduleCallback) {
-    let apiName = '__tcfapi';
-    let callName = `${apiName}Call`;
-    let callId = Math.random() + '';
-    let msg = {
-      [callName]: {
-        command: commandName,
-        version: cmpVersion,
-        parameter: undefined,
-        callId: callId
-      }
-    };
-
-    cmpFrame.postMessage(msg, '*');
-
-    window.addEventListener('message', readPostMessageResponse, false);
-
-    function readPostMessageResponse(event) {
-      let cmpDataPkgName = `${apiName}Return`;
-      let json = (typeof event.data === 'string' && strIncludes(event.data, cmpDataPkgName)) ? JSON.parse(event.data) : event.data;
-      if (json[cmpDataPkgName] && json[cmpDataPkgName].callId) {
-        let payload = json[cmpDataPkgName];
-
-        if (payload.callId === callId) {
-          moduleCallback(payload.returnValue, payload.success);
-        }
-      }
-    }
-  }
+  const getConfigPromise = (moduleName) => {
+    let timer;
+    // Promise has a higher priority than callback, so it should be there first
+    return Promise.race([
+      promisifyGetConfig(moduleName),
+      // will be rejected if config wasn't provided in GET_CONFIG_TIMEOUT ms
+      new Promise((resolve, reject) => timer = setTimeout(reject,
+        GET_CONFIG_TIMEOUT,
+        new Error(`${MODULE_NAME}: ${moduleName} was not configured`)))
+    ]).finally(() =>
+      clearTimeout(timer));
+  };
+  // We're expecting to get both yieldmoSyntheticInventory
+  // and consentManagement configs, so if one of them configs will be rejected --
+  // getConfigs will be rejected as well
+  return Promise.all([
+    getConfigPromise('yieldmoSyntheticInventory'),
+    getConfigPromise('consentManagement'),
+  ])
 }
 
-function lookupUspConsent(uspSuccess, uspError) {
-  function findUsp() {
-    let f = window;
-    let uspapiFrame;
-    let uspapiFunction;
-
-    while (!uspapiFrame) {
-      try {
-        if (isFn(f.__uspapi)) {
-          uspapiFunction = f.__uspapi;
-          uspapiFrame = f;
-          continue;
-        }
-      } catch (e) {}
-
-      try {
-        if (f.frames['__uspapiLocator']) {
-          uspapiFrame = f;
-          continue;
-        }
-      } catch (e) {}
-      if (f === window.top) break;
-      f = f.parent;
-    }
-    return {
-      uspapiFrame,
-      uspapiFunction,
-    };
-  }
-
-  function handleUspApiResponseCallbacks() {
-    const uspResponse = {};
-
-    function afterEach() {
-      if (uspResponse.usPrivacy) {
-        uspSuccess(uspResponse);
-      } else {
-        uspError('Unable to get USP consent string.');
-      }
-    }
-
-    return {
-      consentDataCallback: (consentResponse, success) => {
-        if (success && consentResponse.uspString) {
-          uspResponse.usPrivacy = consentResponse.uspString;
-        }
-        afterEach();
-      },
-    };
-  }
-
-  let callbackHandler = handleUspApiResponseCallbacks();
-  let { uspapiFrame, uspapiFunction } = findUsp();
-
-  if (!uspapiFrame) {
-    return uspError('USP CMP not found.');
-  }
-
-  if (isFn(uspapiFunction)) {
-    uspapiFunction(
-      'getUSPData',
-      USPAPI_VERSION,
-      callbackHandler.consentDataCallback
-    );
-  } else {
-    callUspApiWhileInIframe(
-      'getUSPData',
-      uspapiFrame,
-      callbackHandler.consentDataCallback
-    );
-  }
-
-  function callUspApiWhileInIframe(commandName, uspapiFrame, moduleCallback) {
-    let callId = Math.random() + '';
-    let msg = {
-      __uspapiCall: {
-        command: commandName,
-        version: USPAPI_VERSION,
-        callId: callId,
-      },
-    };
-
-    uspapiFrame.postMessage(msg, '*');
-
-    window.addEventListener('message', readPostMessageResponse, false);
-
-    function readPostMessageResponse(event) {
-      const res = event && event.data && event.data.__uspapiReturn;
-      if (res && res.callId) {
-        if (res.callId === callId) {
-          moduleCallback(res.returnValue, res.success);
-        }
-      }
-    }
-  }
-}
-
-config.getConfig('yieldmo_synthetic_inventory', config => init(config.yieldmo_synthetic_inventory));
+getConfigs()
+  .then(configs => {
+    const siConfig = configs[0].yieldmoSyntheticInventory;
+    validateConfig(siConfig);
+    checkSandbox(window);
+    setGoogleTag();
+    getConsentData()
+      .then(consentData =>
+        getAd(siConfig, consentData))
+      .then(ad =>
+        setAd(siConfig, ad))
+  })
