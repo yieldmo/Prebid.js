@@ -155,11 +155,11 @@ export const spec = {
 
       // Blocklists (request-level): merge ortb2 + params, send as comma-delimited
       // params per the ad server's prebid-js endpoint (AS-5349). Omitted when empty.
-      const bcat = mergeBlocklist(deepAccess(bidderRequest, 'ortb2.bcat'), deepAccess(bannerBidRequests[0], 'params.bcat'));
+      const bcat = getBlocklist(bidderRequest, bannerBidRequests[0], 'bcat');
       if (bcat.length) {
         serverRequest.bcat = bcat.join(',');
       }
-      const badv = mergeBlocklist(deepAccess(bidderRequest, 'ortb2.badv'), deepAccess(bannerBidRequests[0], 'params.badv'));
+      const badv = getBlocklist(bidderRequest, bannerBidRequests[0], 'badv');
       if (badv.length) {
         serverRequest.badv = badv.join(',');
       }
@@ -412,18 +412,19 @@ function getId(request, idType) {
 }
 
 /**
- * Merge a request-level blocklist field (bcat/badv) from its two sources — the
- * standardized ORTB global (`ortb2.<field>`) and the Yieldmo-specific param
- * (`params.<field>`) — into a single deduped array of strings. Neither source is
- * allowed to silently win (union, not precedence). Invalid values are ignored and
- * logged rather than dropping the bid: a source that isn't an array, and any
- * non-string/empty element, are filtered out (with a warning) so a misconfiguration
- * is surfaced without losing the impression.
- * @param {*} ortb2Value value at bidderRequest.ortb2.<field>
- * @param {*} paramsValue value at bid.params.<field>
+ * Resolve a request-level blocklist field (bcat/badv) from its two sources — the
+ * standardized ORTB global (`bidderRequest.ortb2.<field>`) and the Yieldmo-specific
+ * param (`bid.params.<field>`) — into a single deduped array of strings. Neither
+ * source is allowed to silently win (union, not precedence). Invalid values are
+ * ignored and logged rather than dropping the bid: a source that isn't an array, and
+ * any non-string/empty element, are filtered out (with a warning) so a
+ * misconfiguration is surfaced without losing the impression.
+ * @param {BidderRequest} bidderRequest bidder request (source of ortb2.<field>)
+ * @param {BidRequest} bid bid request (source of params.<field>)
+ * @param {string} field blocklist field name — 'bcat' or 'badv'
  * @return {string[]} deduped, trimmed, non-empty string entries (possibly empty)
  */
-function mergeBlocklist(ortb2Value, paramsValue) {
+function getBlocklist(bidderRequest, bid, field) {
   const normalize = (value, source) => {
     if (value === undefined || value === null) {
       return [];
@@ -438,7 +439,10 @@ function mergeBlocklist(ortb2Value, paramsValue) {
     }
     return value.filter(item => isStr(item) && item.trim()).map(item => item.trim());
   };
-  return [...new Set([...normalize(ortb2Value, 'ortb2'), ...normalize(paramsValue, 'params')])];
+  return [...new Set([
+    ...normalize(deepAccess(bidderRequest, `ortb2.${field}`), 'ortb2'),
+    ...normalize(deepAccess(bid, `params.${field}`), 'params'),
+  ])];
 }
 
 /**
@@ -455,8 +459,8 @@ function openRtbRequest(bidRequests, bidderRequest) {
     imp: bidRequests.map(bidRequest => openRtbImpression(bidRequest)),
     site: openRtbSite(bidRequests[0], bidderRequest),
     device: deepAccess(bidderRequest, 'ortb2.device'),
-    badv: mergeBlocklist(deepAccess(bidderRequest, 'ortb2.badv'), deepAccess(bidRequests[0], 'params.badv')),
-    bcat: mergeBlocklist(deepAccess(bidderRequest, 'ortb2.bcat'), deepAccess(bidRequests[0], 'params.bcat')),
+    badv: getBlocklist(bidderRequest, bidRequests[0], 'badv'),
+    bcat: getBlocklist(bidderRequest, bidRequests[0], 'bcat'),
     ext: {
       prebid: '$prebid.version$',
     },
