@@ -12,6 +12,7 @@ import {
   isNumber,
   isStr,
   logError,
+  logWarn,
   parseQueryStringParameters,
   parseUrl
 } from '../src/utils.js';
@@ -151,6 +152,18 @@ export const spec = {
       if (eids.length) {
         serverRequest.eids = JSON.stringify(eids);
       };
+
+      // Blocklists (request-level): merge ortb2 + params, send as comma-delimited
+      // params per the ad server's prebid-js endpoint (AS-5349). Omitted when empty.
+      const bcat = mergeBlocklist(deepAccess(bidderRequest, 'ortb2.bcat'), deepAccess(bannerBidRequests[0], 'params.bcat'));
+      if (bcat.length) {
+        serverRequest.bcat = bcat.join(',');
+      }
+      const badv = mergeBlocklist(deepAccess(bidderRequest, 'ortb2.badv'), deepAccess(bannerBidRequests[0], 'params.badv'));
+      if (badv.length) {
+        serverRequest.badv = badv.join(',');
+      }
+
       // check if url exceeded max length
       const fullUrl = `${bannerUrl}?${parseQueryStringParameters(serverRequest)}`;
       let extraCharacters = fullUrl.length - MAX_BANNER_REQUEST_URL_LENGTH;
@@ -399,6 +412,36 @@ function getId(request, idType) {
 }
 
 /**
+ * Merge a request-level blocklist field (bcat/badv) from its two sources — the
+ * standardized ORTB global (`ortb2.<field>`) and the Yieldmo-specific param
+ * (`params.<field>`) — into a single deduped array of strings. Neither source is
+ * allowed to silently win (union, not precedence). Invalid values are ignored and
+ * logged rather than dropping the bid: a source that isn't an array, and any
+ * non-string/empty element, are filtered out (with a warning) so a misconfiguration
+ * is surfaced without losing the impression.
+ * @param {*} ortb2Value value at bidderRequest.ortb2.<field>
+ * @param {*} paramsValue value at bid.params.<field>
+ * @return {string[]} deduped, trimmed, non-empty string entries (possibly empty)
+ */
+function mergeBlocklist(ortb2Value, paramsValue) {
+  const normalize = (value, source) => {
+    if (value === undefined || value === null) {
+      return [];
+    }
+    if (!isArray(value)) {
+      logWarn(`yieldmo: ignoring ${source} blocklist value; expected an array of strings, got ${JSON.stringify(value)}`);
+      return [];
+    }
+    const dropped = value.filter(item => !isStr(item) || !item.trim());
+    if (dropped.length) {
+      logWarn(`yieldmo: ignoring invalid ${source} blocklist entries (expected non-empty strings): ${JSON.stringify(dropped)}`);
+    }
+    return value.filter(item => isStr(item) && item.trim()).map(item => item.trim());
+  };
+  return [...new Set([...normalize(ortb2Value, 'ortb2'), ...normalize(paramsValue, 'params')])];
+}
+
+/**
  * @param {BidRequest[]} bidRequests bid request object
  * @param {BidderRequest} bidderRequest bidder request object
  * @return Object OpenRTB request object
@@ -412,8 +455,8 @@ function openRtbRequest(bidRequests, bidderRequest) {
     imp: bidRequests.map(bidRequest => openRtbImpression(bidRequest)),
     site: openRtbSite(bidRequests[0], bidderRequest),
     device: deepAccess(bidderRequest, 'ortb2.device'),
-    badv: bidRequests[0].params.badv || [],
-    bcat: deepAccess(bidderRequest, 'bcat') || bidRequests[0].params.bcat || [],
+    badv: mergeBlocklist(deepAccess(bidderRequest, 'ortb2.badv'), deepAccess(bidRequests[0], 'params.badv')),
+    bcat: mergeBlocklist(deepAccess(bidderRequest, 'ortb2.bcat'), deepAccess(bidRequests[0], 'params.bcat')),
     ext: {
       prebid: '$prebid.version$',
     },
@@ -680,10 +723,6 @@ function validateVideoParams(bid) {
     validate('video.skippable', val => !isDefined(val) || isBoolean(val), paramInvalid);
     validate('video.skipafter', val => !isDefined(val) || isNumber(val), paramInvalid);
     validate('video.pos', val => !isDefined(val) || isNumber(val), paramInvalid);
-    validate('params.badv', val => !isDefined(val) || isArray(val), paramInvalid,
-      'array of strings, ex: ["ford.com","pepsi.com"]');
-    validate('params.bcat', val => !isDefined(val) || isArray(val), paramInvalid,
-      'array of strings, ex: ["IAB1-5","IAB1-6"]');
     return true;
   } catch (e) {
     logError(e.message);
