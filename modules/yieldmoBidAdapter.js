@@ -60,7 +60,7 @@ export const spec = {
    */
   isBidRequestValid: function (bid) {
     return !!(bid && bid.adUnitCode && bid.bidId && (hasBannerMediaType(bid) || hasVideoMediaType(bid)) &&
-      validateVideoParams(bid));
+      validateVideoParams(bid) && validateBlocklistParams(bid));
   },
 
   /**
@@ -728,6 +728,28 @@ function validateVideoParams(bid) {
     logError(e.message);
     return false;
   }
+}
+
+/**
+ * Validate the publisher-set blocklist params (`bcat`/`badv`) for all media types
+ * (banner and video). A missing value is allowed; a value that is present but is
+ * not an array is rejected (drops the bid) — the agreed middle ground between
+ * dropping nothing and dropping over an absent optional field. See FS-12403.
+ * @param {BidRequest} bid bid request
+ * @return {boolean} true if valid (or absent), false if present but malformed
+ */
+function validateBlocklistParams(bid) {
+  return ['bcat', 'badv'].every(key => {
+    const val = deepAccess(bid, `params.${key}`);
+    if (val === undefined || val === null) {
+      return true;
+    }
+    if (!isArray(val)) {
+      logError(`yieldmo: bid.params.${key} must be an array of strings when provided; dropping bid`);
+      return false;
+    }
+    return true;
+  });
 }
 
 /**

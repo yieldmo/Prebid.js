@@ -119,5 +119,9 @@ be supplied from either source:
 * the Yieldmo bid params — `bids[].params.bcat` / `bids[].params.badv`.
 
 When both sources are present they are **merged** (union) and de-duplicated — neither
-source overrides the other. Invalid entries (non-strings, empty strings) and
-non-array values are ignored with a console warning rather than dropping the bid.
+source overrides the other.
+
+Validation: a **missing** `bcat`/`badv` is always allowed, but if `params.bcat` /
+`params.badv` is **present and not an array** the bid is rejected (`isBidRequestValid`
+returns false). Non-string / empty elements inside an otherwise-valid array, and a
+malformed `ortb2` value, are dropped with a console warning rather than failing the bid.

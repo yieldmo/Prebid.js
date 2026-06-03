@@ -148,6 +148,28 @@ describe('YieldmoAdapter', function () {
         expect(spec.isBidRequestValid(getBidAndExclude('api'))).to.be.false;
       });
     });
+
+    describe('Blocklist params (bcat / badv):', function () {
+      it('allows a bid when bcat/badv are absent (missing is fine)', function () {
+        expect(spec.isBidRequestValid(mockBannerBid())).to.be.true;
+        expect(spec.isBidRequestValid(mockVideoBid())).to.be.true;
+      });
+
+      it('allows a bid when bcat/badv are arrays', function () {
+        expect(spec.isBidRequestValid(mockBannerBid({}, { bcat: ['IAB1-1'], badv: ['x.com'] }))).to.be.true;
+        expect(spec.isBidRequestValid(mockVideoBid({}, { bcat: ['IAB1-1'], badv: ['x.com'] }))).to.be.true;
+      });
+
+      it('drops a bid when bcat is present but not an array', function () {
+        expect(spec.isBidRequestValid(mockBannerBid({}, { bcat: 'IAB1-1' }))).to.be.false;
+        expect(spec.isBidRequestValid(mockVideoBid({}, { bcat: 'IAB1-1' }))).to.be.false;
+      });
+
+      it('drops a bid when badv is present but not an array', function () {
+        expect(spec.isBidRequestValid(mockBannerBid({}, { badv: 'ford.com' }))).to.be.false;
+        expect(spec.isBidRequestValid(mockVideoBid({}, { badv: 'ford.com' }))).to.be.false;
+      });
+    });
   });
 
   describe('buildRequests', function () {
@@ -888,19 +910,19 @@ describe('YieldmoAdapter', function () {
         expect(payload.badv).to.deep.equal([]);
       });
 
-      describe('malformed handling (filter + warn, never drop the bid)', function () {
+      describe('blocklist normalization in mergeBlocklist', function () {
         let logWarnStub;
         beforeEach(function () { logWarnStub = sinon.stub(utils, 'logWarn'); });
         afterEach(function () { logWarnStub.restore(); });
 
-        it('ignores a non-array source and warns', function () {
+        it('ignores a non-array ortb2 source and warns (ortb2 is not bid-validated)', function () {
           const bidderReq = mockBidderRequest({ ortb2: { bcat: 'IAB1-1' } });
           const data = buildAndGetData([mockBannerBid()], 0, bidderReq);
           expect(data).to.not.have.property('bcat');
           expect(logWarnStub.called).to.be.true;
         });
 
-        it('filters non-string / empty elements and warns', function () {
+        it('filters non-string / empty elements out of a valid array and warns', function () {
           const data = buildAndGetData([mockBannerBid({}, { bcat: ['IAB1-1', '', 5, '  '] })], 0, mockBidderRequest());
           expect(data.bcat).to.equal('IAB1-1');
           expect(logWarnStub.called).to.be.true;
@@ -909,13 +931,6 @@ describe('YieldmoAdapter', function () {
         it('trims whitespace around entries', function () {
           const data = buildAndGetData([mockBannerBid({}, { bcat: [' IAB1-1 '] })], 0, mockBidderRequest());
           expect(data.bcat).to.equal('IAB1-1');
-        });
-
-        it('does not drop a banner or video bid when bcat/badv are malformed', function () {
-          logWarnStub.restore(); // isBidRequestValid doesn't warn; avoid unused-stub noise
-          expect(spec.isBidRequestValid(mockBannerBid({}, { bcat: 'oops' }))).to.be.true;
-          expect(spec.isBidRequestValid(mockVideoBid({}, { bcat: 'oops' }))).to.be.true;
-          logWarnStub = sinon.stub(utils, 'logWarn');
         });
       });
     });
