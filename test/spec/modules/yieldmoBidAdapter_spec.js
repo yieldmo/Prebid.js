@@ -308,6 +308,35 @@ describe('YieldmoAdapter', function () {
           });
           expect(buildAndGetData([bid])).to.not.have.property('tdid');
         });
+
+        // Real getUserIdsAsEids() capture from www.yahoo.com (Prebid 9.53.2): a
+        // 13-source blob with a single adserver.org entry tagged rtiPartner TDID, a
+        // pubcid.org, no criteo, plus 11 sources we never read as flat params.
+        // Verifies flat tdid/pubcid are recovered on 10+ and every source still ships
+        // via the `eids` param.
+        it('should recover pubcid/tdid from a real Yahoo userIdAsEids blob and forward all sources', function () {
+          const yahooEids = [
+            { source: 'yahoo.com', uids: [{ id: 'ceKGMBMyiD_y9Hiy3yEezGpqPWhG9vckE9uQ9dXvzZ7YH5B3OcU3GkuAGulWrJrGMqumCS4bkIWCl_HKMsb2eQ', atype: 3 }] },
+            { source: 'liveramp.com', uids: [{ id: 'ApoINPkmDal1SZ-1eFryc322FuBMuiTIfa0n83qkZ9d4TmmF2yjDwWNFt0rOB2DBaH5YnHs', atype: 3 }] },
+            { source: 'liveintent.com', uids: [{ id: '31-AEQ3i4A7U6Q/VmkQW8HMRDb69Hc4Dmb3d9Vw5OujdEhuKayNFArmrWkjwcXZsaWltfVm1zsQVPR6lhgSdD4H6PLANZWX8wE7ctQxbQuxYgvwBQXrbQW4', atype: 3 }] },
+            { source: 'liveintent.triplelift.com', uids: [{ id: '3039651338209079102359', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'rubiconproject.com', uids: [{ id: 'MEDJJCH8-O-IKN8', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'liveintent.indexexchange.com', uids: [{ id: 'aJ-V4sAoIlYAKl2pAwiuIwAA&2037', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'openx.net', uids: [{ id: '7a105d7c-4708-4c2d-a3ba-1e795e46983e', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'pubmatic.com', uids: [{ id: '4235B560-BD45-4F77-9695-19B7846C1E31', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'liveintent.sovrn.com', uids: [{ id: 'LLFyABZHZ8flvu7cQ-Giva3O', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'liveintent.sonobi.com', uids: [{ id: '9706c68f-27f2-4424-af37-ab315995f8b0', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'liveintent.unrulymedia.com', uids: [{ id: 'RX-1927b623-5cc4-4212-b089-32380b081397-005', atype: 3, ext: { provider: 'liveintent.com' } }] },
+            { source: 'pubcid.org', uids: [{ id: '41137366-b187-4188-bd07-7e858ac15a9b', atype: 1 }] },
+            { source: 'adserver.org', uids: [{ id: '44d89fb7-c8f6-4c5d-913f-d41707bd4511', atype: 1, ext: { rtiPartner: 'TDID' } }], inserter: 'adserver.org', matcher: 'adserver.org', mm: 4 },
+          ];
+          const data = buildAndGetData([mockBannerBid({ crumbs: undefined, userId: undefined, userIdAsEids: yahooEids })]);
+          expect(data.pubcid).to.equal('41137366-b187-4188-bd07-7e858ac15a9b');
+          expect(data.tdid).to.equal('44d89fb7-c8f6-4c5d-913f-d41707bd4511');
+          expect(data).to.not.have.property('cri_prebid');
+          // every EID source is still forwarded intact via the eids param
+          expect(JSON.parse(data.eids).map(e => e.source)).to.have.members(yahooEids.map(e => e.source));
+        });
       });
 
       it('should add gdpr information to request if available', () => {
