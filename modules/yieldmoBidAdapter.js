@@ -389,13 +389,36 @@ function getPageDescription() {
 }
 
 /**
- * Gets an id from the userId object if it exists
+ * EID source for each legacy `bid.userId` key this adapter reads, so those ids
+ * can be recovered from `userIdAsEids` on Prebid 10+, where the `bid.userId`
+ * object was removed (prebid/Prebid.js#13253, first shipped in 10.0.0). Without
+ * this the tdid/pubcid/cri_prebid request params silently stop being sent.
+ */
+const EID_SOURCE_BY_USER_ID = {
+  pubcid: 'pubcid.org',
+  tdid: 'adserver.org',
+  criteoId: 'criteo.com',
+};
+
+/**
+ * Gets an id previously read from the (now-removed) `bid.userId` object.
+ * Prefers the legacy object when present (pre-Prebid 10); otherwise falls back
+ * to the matching source in `userIdAsEids`.
  * @param {*} request
  * @param {*} idType
  * @returns an id if there is one, or undefined
  */
 function getId(request, idType) {
-  return (typeof deepAccess(request, 'userId') === 'object') ? request.userId[idType] : undefined;
+  const legacyUserId = deepAccess(request, 'userId');
+  if (typeof legacyUserId === 'object' && legacyUserId != null && legacyUserId[idType] != null) {
+    return legacyUserId[idType];
+  }
+  const source = EID_SOURCE_BY_USER_ID[idType];
+  if (source) {
+    const eid = (getEids(request) || []).find(e => e && e.source === source);
+    return deepAccess(eid, 'uids.0.id');
+  }
+  return undefined;
 }
 
 /**
