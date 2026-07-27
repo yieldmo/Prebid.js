@@ -267,6 +267,49 @@ describe('YieldmoAdapter', function () {
         expect(buildAndGetData([criteoIdBid]).cri_prebid).to.deep.equal(criteoId);
       });
 
+      // Prebid 10+ removed the legacy bid.userId object (prebid/Prebid.js#13253),
+      // leaving only userIdAsEids. tdid/pubcid/cri_prebid must be recovered from
+      // there so they keep being sent.
+      describe('userIdAsEids fallback (Prebid 10+, no bid.userId)', function () {
+        const eidsOnlyBid = (extraEids = []) => mockBannerBid({
+          crumbs: undefined,
+          userId: undefined,
+          userIdAsEids: [
+            { source: 'pubcid.org', uids: [{ id: 'eid_pubcid', atype: 1 }] },
+            { source: 'adserver.org', uids: [{ id: 'eid_tdid', atype: 1, ext: { rtiPartner: 'TDID' } }] },
+            { source: 'criteo.com', uids: [{ id: 'eid_criteo', atype: 1 }] },
+            ...extraEids,
+          ],
+        });
+
+        it('should read tdid from userIdAsEids adserver.org', function () {
+          expect(buildAndGetData([eidsOnlyBid()]).tdid).to.equal('eid_tdid');
+        });
+
+        it('should read pubcid from userIdAsEids pubcid.org', function () {
+          expect(buildAndGetData([eidsOnlyBid()]).pubcid).to.equal('eid_pubcid');
+        });
+
+        it('should read criteoId from userIdAsEids criteo.com', function () {
+          expect(buildAndGetData([eidsOnlyBid()]).cri_prebid).to.equal('eid_criteo');
+        });
+
+        it('should prefer the legacy bid.userId object when both are present', function () {
+          const bid = eidsOnlyBid();
+          bid.userId = { tdid: 'legacy_tdid' };
+          expect(buildAndGetData([bid]).tdid).to.equal('legacy_tdid');
+        });
+
+        it('should omit an id whose source is absent from userIdAsEids', function () {
+          const bid = mockBannerBid({
+            crumbs: undefined,
+            userId: undefined,
+            userIdAsEids: [{ source: 'pubcid.org', uids: [{ id: 'eid_pubcid', atype: 1 }] }],
+          });
+          expect(buildAndGetData([bid])).to.not.have.property('tdid');
+        });
+      });
+
       it('should add gdpr information to request if available', () => {
         const gdprConsent = {
           consentString: 'BOJ/P2HOJ/P2HABABMAAAAAZ+A==',
