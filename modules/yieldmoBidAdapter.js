@@ -77,7 +77,6 @@ export const spec = {
     const videoBidRequests = bidRequests.filter(request => hasVideoMediaType(request));
     const serverRequests = [];
     const eids = getEids(bidRequests[0]) || [];
-    const topicsData = getTopics(bidderRequest);
     const cdep = getCdep(bidderRequest);
     if (bannerBidRequests.length > 0) {
       const serverRequest = {
@@ -99,9 +98,6 @@ export const spec = {
             deepAccess(bidderRequest, 'gppConsent.applicableSections') || []}),
         us_privacy: deepAccess(bidderRequest, 'uspConsent') || '',
       };
-      if (topicsData) {
-        serverRequest.topics = JSON.stringify(topicsData);
-      }
       const gpc = getGPCSignal(bidderRequest);
       if (gpc) {
         serverRequest.gpc = gpc;
@@ -173,9 +169,6 @@ export const spec = {
 
     if (videoBidRequests.length > 0) {
       const serverRequest = openRtbRequest(videoBidRequests, bidderRequest);
-      if (topicsData) {
-        serverRequest.topics = topicsData;
-      }
       if (eids.length) {
         deepSetValue(serverRequest, 'user.ext.eids', eids);
       };
@@ -442,25 +435,6 @@ function getGPCSignal(bidderRequest) {
 function getCdep(bidderRequest) {
   const cdep = deepAccess(bidderRequest, 'ortb2.device.ext.cdep') || null;
   return cdep;
-}
-
-function getTopics(bidderRequest) {
-  const userData = deepAccess(bidderRequest, 'ortb2.user.data') || [];
-  const topicsData = userData.filter((dataObj) => {
-    const segtax = dataObj.ext?.segtax;
-    return segtax >= 600 && segtax <= 609;
-  })[0];
-
-  if (topicsData) {
-    const topicsObject = {
-      taxonomy: topicsData.ext.segtax,
-      classifier: topicsData.ext.segclass,
-      // topics needs to be array of numbers
-      topics: Object.values(topicsData.segment).map(i => Number(i)),
-    };
-    return topicsObject;
-  }
-  return null;
 }
 
 /**
