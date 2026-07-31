@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { spec } from 'modules/yieldmoBidAdapter.js';
 import * as utils from 'src/utils.js';
+import { config } from 'src/config.js';
 
 /* eslint no-console: ["error", { allow: ["log", "warn", "error"] }] */
 // above is used for debugging purposes only
@@ -462,6 +463,21 @@ describe('YieldmoAdapter', function () {
         expect(biddata[0].data.gpc).to.equal('1');
       });
 
+      it('should discard the banner request entirely when coppa is set', function () {
+        config.setConfig({ coppa: true });
+        try {
+          expect(build([mockBannerBid()])).to.deep.equal([]);
+        } finally {
+          config.resetConfig();
+        }
+      });
+
+      it('should build a normal banner request when coppa is not set', function () {
+        const requests = build([mockBannerBid()], mockBidderRequest());
+        expect(requests.length).to.equal(1);
+        expect(requests[0].url).to.equal(BANNER_ENDPOINT);
+      });
+
       it('should add eids to the banner bid request', function () {
         const params = {
           userIdAsEids: [{
@@ -758,6 +774,15 @@ describe('YieldmoAdapter', function () {
         expect(payload.regs.ext.gpc).to.equal('1');
       });
 
+      it('should discard the video request entirely when coppa is set', function () {
+        config.setConfig({ coppa: true });
+        try {
+          expect(build([mockVideoBid()], mockBidderRequest({}, [mockVideoBid()]))).to.deep.equal([]);
+        } finally {
+          config.resetConfig();
+        }
+      });
+
       it('should add device info to payload if available', function () {
         let videoBidder = mockBidderRequest({ ortb2: {
           device: {
@@ -945,6 +970,15 @@ describe('YieldmoAdapter', function () {
     });
     it('should register no syncs', function () {
       expect(spec.getUserSyncs({})).to.deep.equal([]);
+    });
+    it('should register no syncs on COPPA (child-directed) traffic', function () {
+      config.setConfig({ coppa: true });
+      try {
+        expect(spec.getUserSyncs({ iframeEnabled: true })).to.deep.equal([]);
+        expect(spec.getUserSyncs({ pixelEnabled: true })).to.deep.equal([]);
+      } finally {
+        config.resetConfig();
+      }
     });
   });
 });
